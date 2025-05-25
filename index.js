@@ -1,6 +1,6 @@
 const { Telegraf, Markup } = require('telegraf');
 
-const bot = new Telegraf('YOUR_BOT_TOKEN'); // ← Replace this with your real bot token
+const bot = new Telegraf('8132249975:AAEoiH1BbbXAiI8ymk0ayTHGUuTFsealkok'); // ← Replace this with your real bot token
 const OWNER_ID = 7527489536;
 const lastPredictions = new Map();
 
