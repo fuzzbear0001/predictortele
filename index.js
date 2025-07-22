@@ -1,149 +1,94 @@
-const { Telegraf, Markup } = require('telegraf');
+const axios = require('axios');
+const TelegramBot = require('node-telegram-bot-api');
+const { Connection, LAMPORTS_PER_SOL, PublicKey } = require('@solana/web3.js');
 
-const bot = new Telegraf('8132249975:AAEoiH1BbbXAiI8ymk0ayTHGUuTFsealkok'); // ← Replace this with your real bot token
-const OWNER_ID = 7527489536;
-const lastPredictions = new Map();
+// === CONFIG ===
+const BOT_TOKEN = '7869925971:AAHqs4tmrzLekpsdFTr2jHqQzrHFeOZRIFU';
+const CHANNEL_ID = '-1002585872966';
+const MORALIS_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6ImY3YTRjMjdkLTZiMzAtNGRjMi04MjI5LTI4NTkxNWEzZWFkMiIsIm9yZ0lkIjoiNDYwNjU0IiwidXNlcklkIjoiNDczOTI3IiwidHlwZUlkIjoiZGM3YjQ3MWItZmM3Mi00NmNlLWI5Y2UtZGY0ZDg1YTE0NGI0IiwidHlwZSI6IlBST0pFQ1QiLCJpYXQiOjE3NTMxNjc1NDYsImV4cCI6NDkwODkyNzU0Nn0.GdWOqVjqJi37fz4Rni9uwaYmH4-srahSXlcxJicB6gE'; // keep rest if real
+const MORALIS_URL = 'https://solana-gateway.moralis.io/token/mainnet/exchange/pumpfun/new';
+const SOL_RPC = 'https://api.mainnet-beta.solana.com';
 
-function getSyncedPrediction() {
-  const now = Math.floor(Date.now() / 10000);
-  const seed = now * 10000;
-  const rng = mulberry32(seed);
-  const value = (rng() * 9 + 1).toFixed(2);
-  return value;
-}
+const bot = new TelegramBot(BOT_TOKEN, { polling: false });
+const connection = new Connection(SOL_RPC);
+const seen = new Set();
 
-function mulberry32(a) {
-  return function () {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function getLuckEmoji(value) {
-  const x = parseFloat(value);
-  if (x < 1.5) return '💩 Rekt!';
-  if (x < 2.0) return '😬 Sketchy...';
-  if (x < 4.0) return '🧠 Decent';
-  if (x < 6.0) return '🔥 Clean!';
-  return '🚀 ABSOLUTE BANGER';
-}
-
-function mainButtons() {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback('🎯 Predict Again', 'predict')],
-    [Markup.button.callback('📈 Last Prediction', 'last')],
-    [Markup.button.callback('🎲 Roll Dice', 'roll')],
-    [Markup.button.callback('ℹ️ Help', 'help')]
-  ]);
-}
-
-function isOwner(ctx) {
-  const id = ctx.from?.id;
-  if (id !== OWNER_ID) {
-    const msg = `🚫 *Access Denied*\n\nThis bot is for premium users only.
-
-💰 *One-Time Purchase:* £82.99  
-📈 Includes: £1,500 in locked *Shortenr.me* shares (12 months vesting)
-
-To unlock, send *SOL* to:
-
-\`\`\`
-GbbktzF5yDFryTi31oweRxxFtezWSfixK1TGt5v87HuT
-\`\`\`
-
-Once sent, your access will be automatically activated within ~5 minutes.
-
-🔐 Powered by [Shortenr.me](https://shortenr.me)
-`;
-    ctx.reply(msg, {
-      parse_mode: 'Markdown',
-      disable_web_page_preview: true
+async function fetchNewTokens(limit = 10) {
+  try {
+    const res = await axios.get(MORALIS_URL, {
+      headers: { 'X-API-Key': MORALIS_API_KEY },
+      params: { limit },
     });
-    return false;
+    return res.data.result || [];
+  } catch (err) {
+    console.error('❌ Error fetching tokens:', err.message);
+    return [];
   }
-  return true;
 }
 
-bot.start((ctx) => {
-  if (!isOwner(ctx)) return;
-  ctx.reply(
-    '🧠 *Crash Predictor 9000*\n\nTap "Predict" to see what multiplier’s next!',
-    {
-      parse_mode: 'Markdown',
-      reply_markup: mainButtons().reply_markup
+async function getSolBalance(address) {
+  try {
+    const lamports = await connection.getBalance(new PublicKey(address));
+    return lamports / LAMPORTS_PER_SOL;
+  } catch {
+    return null;
+  }
+}
+
+function formatToken(token, solBalance) {
+  const mint = token.tokenAddress ?? 'Unknown';
+  const symbol = (token.symbol ?? '???').toUpperCase();
+  const name = token.name ?? 'Unknown';
+  const holders = token.holderCount ?? 'n/a';
+  const gmgn = `https://gmgn.ai/sol/token/${mint}`;
+  const sol = solBalance !== null ? solBalance.toFixed(4) : 'n/a';
+  const devInfo = solBalance === null
+    ? '🔍 Unknown'
+    : solBalance < 2
+    ? '⚠️ Low Dev Balance'
+    : '✅ Dev Looks Funded';
+
+  return `
+💊💊💊 PUMP DETECTED / LAUNCH 💊💊💊
+
+🔹 ${symbol} (${name})
+📦 Contract: ${mint}
+🧑‍💻 Dev Wallet: ${token.creatorAddress ?? 'Unknown'}
+💰 Dev Balance: ${sol} SOL
+📊 Holders: ${holders}
+🌐 GMGN: ${gmgn}
+NOTE THIS IS A FREE BOT TO BUY INSIDER ACCESS TO PUMPS AND DUMPS MESSAGS @iamkrist0f_uk
+🕒 Launched: ${new Date(token.createdAt).toLocaleString()}
+`.trim();
+}
+
+async function postToken(token) {
+  if (!token || seen.has(token.tokenAddress)) return;
+  seen.add(token.tokenAddress);
+
+  const solBalance = token.creatorAddress
+    ? await getSolBalance(token.creatorAddress)
+    : null;
+
+  const message = formatToken(token, solBalance);
+
+  try {
+    await bot.sendMessage(CHANNEL_ID, message);
+    console.log(`✅ Posted: ${token.symbol ?? 'Unknown'}`);
+  } catch (e) {
+    console.error('❌ Telegram error:', e.message);
+  }
+}
+
+async function runBot() {
+  console.log('🚀 Starting Meme Coin Bot...');
+  while (true) {
+    const tokens = await fetchNewTokens(10);
+    for (const token of tokens) {
+      await postToken(token);
+      await new Promise((res) => setTimeout(res, 30_000)); // wait 10 seconds per post
     }
-  );
-});
-
-bot.command('predict', (ctx) => isOwner(ctx) && handlePredict(ctx));
-bot.action('predict', (ctx) => isOwner(ctx) && handlePredict(ctx));
-
-function handlePredict(ctx) {
-  const userId = ctx.from.id;
-  const prediction = getSyncedPrediction();
-  lastPredictions.set(userId, prediction);
-
-  const message = `🔮 *Predicted Multiplier:* \`${prediction}x\`\n${getLuckEmoji(prediction)}`;
-  ctx.reply(message, {
-    parse_mode: 'Markdown',
-    reply_markup: mainButtons().reply_markup
-  });
-  if (ctx.callbackQuery) ctx.answerCbQuery();
+  }
 }
 
-bot.command('last', (ctx) => isOwner(ctx) && handleLast(ctx));
-bot.action('last', (ctx) => isOwner(ctx) && handleLast(ctx));
-
-function handleLast(ctx) {
-  const userId = ctx.from.id;
-  const last = lastPredictions.get(userId);
-  const msg = last
-    ? `🕒 Your last prediction was: \`${last}x\`\n${getLuckEmoji(last)}`
-    : '❌ No prediction found yet. Tap "Predict" first!';
-  ctx.reply(msg, {
-    parse_mode: 'Markdown',
-    reply_markup: mainButtons().reply_markup
-  });
-  if (ctx.callbackQuery) ctx.answerCbQuery();
-}
-
-bot.command('roll', (ctx) => isOwner(ctx) && handleRoll(ctx));
-bot.action('roll', (ctx) => isOwner(ctx) && handleRoll(ctx));
-
-function handleRoll(ctx) {
-  const roll = (Math.random() * 100).toFixed(2);
-  let reaction = '😐 Meh';
-  if (roll > 90) reaction = '💸 JACKPOT';
-  else if (roll > 70) reaction = '🔥 Big Win';
-  else if (roll < 20) reaction = '☠️ Dead roll';
-
-  ctx.reply(`🎲 *You rolled:* \`${roll}\`\n${reaction}`, {
-    parse_mode: 'Markdown',
-    reply_markup: mainButtons().reply_markup
-  });
-  if (ctx.callbackQuery) ctx.answerCbQuery();
-}
-
-bot.command('help', (ctx) => isOwner(ctx) && showHelp(ctx));
-bot.action('help', (ctx) => isOwner(ctx) && showHelp(ctx));
-
-function showHelp(ctx) {
-  const msg = `ℹ️ *Crash Predictor Help*\n
-• Tap 🎯 *Predict Again* to get the synced crash multiplier.
-• 📈 *Last Prediction* shows your most recent result.
-• 🎲 *Roll Dice* for a side mini-game.
-• No signup needed. All vibes.
-
-💡 Predictions update every 10 seconds.`;
-  ctx.reply(msg, {
-    parse_mode: 'Markdown',
-    reply_markup: mainButtons().reply_markup
-  });
-  if (ctx.callbackQuery) ctx.answerCbQuery();
-}
-
-bot.launch();
-console.log('🚀 Crash Predictor Bot is live & secured.');
+runBot();
